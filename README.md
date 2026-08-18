@@ -13,17 +13,12 @@
 
 ## 下载
 
-### Windows 用户
 
 无需安装 Python，直接下载 Release 中的 **`.exe` 可执行文件**：
 
 [下载最新版本](https://github.com/Iceclank/Wake-Up-Service/releases/latest)
 
 下载后将 `.exe` 文件与 MP4 视频放在同一文件夹下，双击运行即可。
-
-### 源码运行（全平台）
-
-适合 macOS / Linux 用户，或需要自定义功能的开发者。
 
 ---
 
@@ -32,7 +27,6 @@
 - **全自动格式转换**：启动时自动检测根目录下的 MP4 文件，一键转换为 MP3 并存入 `audio/` 文件夹
 - **智能同步**：自动比对 MP4 与 MP3 文件，新增、删除、修改时自动重新转换
 - **随机播放**：3 秒文件名滚动动画，随机抽取并播放音频，已播放自动排除不重复
-- **跨平台支持**：Windows / macOS / Linux 通用，自动识别系统并安装 FFmpeg
 - **启动参数**：支持 `-r` 参数启动后自动开始随机播放
 - **音量调节**：内置音量滑块，实时调节播放音量
 
@@ -40,7 +34,7 @@
 
 ## 快速开始
 
-### 方式一：直接运行 exe（Windows）
+### 直接运行 exe（Windows）
 
 1. 从 [Releases](https://github.com/Iceclank/Wake-Up-Service/releases) 下载 `Wake-Up-Service.exe`
 2. 将 `.exe` 和 MP4 文件放在同一文件夹下
@@ -53,16 +47,6 @@
 ├── video_02.mp4
 └── audio/              # 自动生成
 ```
-
-### 方式二：源码运行（全平台）
-
-```bash
-git clone https://github.com/Iceclank/Wake-Up-Service.git
-cd Wake-Up-Service
-pip install -r requirements.txt
-python random_mp3_player_auto.py
-```
-
 ---
 
 ## 使用说明
@@ -84,23 +68,6 @@ python random_mp3_player_auto.py
 
 # 自动播放模式 —— 同步完成后立即开始随机播放
 python random_mp3_player_auto.py -r
-```
-
----
-
-## 文件结构
-
-```
-Wake-Up-Service/
-├── random_mp3_player_auto.py   # 主程序（源码）
-├── requirements.txt             # Python 依赖
-├── README.md                    # 本文件
-├── LICENSE                      # 许可证
-├── .gitignore                   # Git 忽略规则
-├── audio/                       # 自动生成的 MP3 文件夹（无需提交）
-├── ffmpeg/                      # 自动下载的 FFmpeg（无需提交）
-└── docs/
-    └── screenshot.png           # 截图
 ```
 
 ---
