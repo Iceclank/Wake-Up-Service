@@ -24,16 +24,6 @@ try:
 except ImportError:
     pygame = None
 
-
-def get_app_dir():
-    """获取程序所在目录，兼容源码运行和 PyInstaller 打包后的 exe"""
-    if getattr(sys, 'frozen', False):
-        # PyInstaller 打包后的 exe，sys.executable 指向 exe 文件本身
-        return os.path.dirname(os.path.abspath(sys.executable))
-    else:
-        # 源码运行，__file__ 指向 .py 文件
-        return os.path.dirname(os.path.abspath(__file__))
-
 #  FFmpeg自动安装器
 class FFmpegAutoInstaller:
     def __init__(self, root_dir):
@@ -396,6 +386,7 @@ class AudioPlayer:
         self._play_thread = None
         self._pygame_ok = False
         self._ffplay_cmd = ffplay_cmd
+        self._volume = 1.0
 
         if pygame:
             try:
@@ -404,6 +395,15 @@ class AudioPlayer:
             except Exception as e:
                 print(f"[AudioPlayer] pygame mixer init failed: {e}")
                 self._pygame_ok = False
+
+    def set_volume(self, value):
+        """设置音量，value 为 0.0 ~ 1.0"""
+        self._volume = max(0.0, min(1.0, value))
+        if self._pygame_ok and pygame.mixer.get_init():
+            try:
+                pygame.mixer.music.set_volume(self._volume)
+            except Exception:
+                pass
 
     def play(self, filepath, on_finish=None):
         self.stop()
@@ -414,6 +414,7 @@ class AudioPlayer:
                 if self._pygame_ok:
                     try:
                         pygame.mixer.music.load(filepath)
+                        pygame.mixer.music.set_volume(self._volume)
                         pygame.mixer.music.play()
                         while pygame.mixer.music.get_busy():
                             if self._stop_event.is_set():
@@ -527,7 +528,7 @@ class RandomPlayerApp:
         self.root.configure(bg=self.BG_MAIN)
         self.root.minsize(480, 400)
 
-        self.root_dir = get_app_dir()
+        self.root_dir = os.path.dirname(os.path.abspath(__file__))
         self.auto_random = auto_random  # 是否启动后自动随机播放
 
         self.ffmpeg_installer = FFmpegAutoInstaller(self.root_dir)
@@ -552,6 +553,13 @@ class RandomPlayerApp:
         anim_font = tkfont.Font(family="Microsoft YaHei", size=16, weight="bold")
         info_font = tkfont.Font(family="Microsoft YaHei", size=11)
         btn_font = tkfont.Font(family="Microsoft YaHei", size=12, weight="bold")
+
+        # 菜单栏
+        menubar = tk.Menu(self.root, bg=self.BG_MAIN, fg=self.FG_TEXT, relief="flat")
+        help_menu = tk.Menu(menubar, tearoff=0, bg=self.BG_FRAME, fg=self.FG_TEXT)
+        help_menu.add_command(label="关于", command=self._show_about)
+        menubar.add_cascade(label="帮助", menu=help_menu)
+        self.root.config(menu=menubar)
 
         tk.Label(
             self.root, text="午休服务", font=title_font,
@@ -606,11 +614,27 @@ class RandomPlayerApp:
         )
         self.reset_btn.pack(side=tk.LEFT, padx=6)
 
+        # 音量控制
+        vol_frame = tk.Frame(self.root, bg=self.BG_MAIN)
+        vol_frame.pack(pady=(4, 2))
+
+        tk.Label(vol_frame, text="音量:", font=("Microsoft YaHei", 10),
+                 bg=self.BG_MAIN, fg=self.FG_DIM).pack(side=tk.LEFT, padx=(0, 4))
+
+        self.volume_var = tk.IntVar(value=100)
+        self.volume_scale = tk.Scale(
+            vol_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+            length=200, showvalue=True, variable=self.volume_var,
+            bg=self.BG_MAIN, fg=self.FG_TEXT, troughcolor=self.BG_FRAME,
+            highlightthickness=0, command=self._on_volume_change
+        )
+        self.volume_scale.pack(side=tk.LEFT)
+
         self.status_label = tk.Label(
             self.root, text="状态: 启动中...", font=("Microsoft YaHei", 10),
             bg=self.BG_MAIN, fg=self.FG_DIM
         )
-        self.status_label.pack(pady=(8, 5))
+        self.status_label.pack(pady=(4, 5))
 
         self.convert_btn = tk.Button(
             self.root, text="手动转换/同步", font=("Microsoft YaHei", 10),
@@ -852,6 +876,21 @@ class RandomPlayerApp:
         self.anim_label.config(text="列表已重置", fg=self.FG_HIGHLIGHT)
         self._set_status("列表已重置")
 
+    def _on_volume_change(self, value):
+        """音量滑块变化回调"""
+        if self.player:
+            self.player.set_volume(int(value) / 100.0)
+
+    def _show_about(self):
+        """显示关于对话框"""
+        about_text = (
+            "午休服务\n启动参数: -r 启动后开始随机播放\n"
+            "Designed by Iceclank (https://github.com/Iceclank)\n"
+            "Constructed by KIMI 2.6\n"
+            "Format conversion by FFmpeg (https://ffmpeg.org)\n"
+        )
+        messagebox.showinfo("关于", about_text)
+
     def on_close(self):
         if self.player:
             self.player.cleanup()
@@ -871,3 +910,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# tmd午读能不能去死啊？
