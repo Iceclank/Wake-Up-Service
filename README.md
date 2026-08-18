@@ -7,7 +7,7 @@
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-Auto%20Install-green)](https://ffmpeg.org/)
 [![Release](https://img.shields.io/github/v/release/Iceclank/Wake-Up-Service)](https://github.com/Iceclank/Wake-Up-Service/releases)
 
-起因是学校新搞了个午读，班主任让我中午放音乐把大家叫起来，鉴于我~~不想读+起不来~~热衷于自动化，遂开发此项目交差
+**起因是学校新搞了个午读，班主任让我中午放音乐把大家叫起来，鉴于我** *~~不想读+起不来~~* **热衷于自动化，遂开发此项目交差**
 
 ---
 
