@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import messagebox, font as tkfont
 from urllib.request import urlretrieve
 import zipfile
+import json
 
 try:
     import pygame
@@ -527,9 +528,16 @@ class RandomPlayerApp:
         self.root.geometry("600x480")
         self.root.configure(bg=self.BG_MAIN)
         self.root.minsize(480, 400)
-
-        self.root_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 单文件模式：exe 所在目录
+            self.root_dir = os.path.dirname(sys.executable)
+        else:
+            # 源码运行：脚本所在目录
+            self.root_dir = os.path.dirname(os.path.abspath(__file__))
         self.auto_random = auto_random  # 是否启动后自动随机播放
+
+        # 【新增】已播放历史记录文件路径
+        self.history_file = os.path.join(self.root_dir, ".played_history.json")
 
         self.ffmpeg_installer = FFmpegAutoInstaller(self.root_dir)
         self.ffmpeg_cmd = self.ffmpeg_installer.get_ffmpeg()
@@ -547,6 +555,29 @@ class RandomPlayerApp:
 
         self._build_ui()
         self.root.after(300, self._startup_flow)
+
+    # 【新增】加载已播放历史
+    def _load_played_history(self):
+        """从文件加载已播放历史，返回列表"""
+        if not os.path.exists(self.history_file):
+            return []
+        try:
+            with open(self.history_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[History] 加载历史记录失败: {e}")
+        return []
+
+    # 【新增】保存已播放历史
+    def _save_played_history(self):
+        """将已播放列表保存到文件"""
+        try:
+            with open(self.history_file, "w", encoding="utf-8") as f:
+                json.dump(self.played, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            print(f"[History] 保存历史记录失败: {e}")
 
     def _build_ui(self):
         title_font = tkfont.Font(family="Microsoft YaHei", size=18, weight="bold")
@@ -746,9 +777,19 @@ class RandomPlayerApp:
     def _load_audio_list(self):
         audio_files = self.converter.get_audio_files()
         self.all_files = audio_files.copy()
-        self.remaining = audio_files.copy()
-        self.played = []
+        
+        # 【新增】加载历史记录并恢复播放状态
+        history = self._load_played_history()
+        # 只保留当前仍然存在的文件（防止文件被删除后历史记录残留）
+        self.played = [f for f in history if f in self.all_files]
+        # 剩余文件 = 所有文件 - 已播放
+        self.remaining = [f for f in self.all_files if f not in self.played]
+        
         self._update_info()
+        
+        # 如果有恢复的历史记录，显示提示
+        if self.played:
+            self._set_status(f"已恢复 {len(self.played)} 首播放记录")
 
     def _do_conversion(self, auto_mode=False):
         self.convert_btn.config(state=tk.DISABLED)
@@ -841,6 +882,9 @@ class RandomPlayerApp:
         chosen = random.choice(self.remaining)
         self.remaining.remove(chosen)
         self.played.append(chosen)
+        
+        # 【新增】每次播放后自动保存历史
+        self._save_played_history()
 
         self.anim_label.config(text=f"已选中: {chosen}", fg=self.FG_HIGHLIGHT)
         self._update_info()
@@ -872,6 +916,10 @@ class RandomPlayerApp:
         self.player.stop()
         self.remaining = self.all_files.copy()
         self.played = []
+        
+        # 【新增】重置时清空历史文件
+        self._save_played_history()
+        
         self._update_info()
         self.anim_label.config(text="列表已重置", fg=self.FG_HIGHLIGHT)
         self._set_status("列表已重置")
@@ -892,6 +940,9 @@ class RandomPlayerApp:
         messagebox.showinfo("关于", about_text)
 
     def on_close(self):
+        # 【新增】关闭前保存已播放历史
+        self._save_played_history()
+        
         if self.player:
             self.player.cleanup()
         if self.animation_after_id:
@@ -910,5 +961,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# tmd午读能不能去死啊？
