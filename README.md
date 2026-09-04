@@ -108,5 +108,3 @@ python random_mp3_player_auto.py -r
 > **注意**：若您分发的程序包中包含了 FFmpeg 的可执行文件，需遵守 [FFmpeg 的许可证条款](https://ffmpeg.org/legal.html)（通常为 GPL/LGPL）。FFmpeg 的许可证独立于本项目，请确保在分发时附带 FFmpeg 的源码或相关声明。
 
 
-
-~~沟槽的午读能不能qs啊?~~
