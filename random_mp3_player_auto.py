@@ -18,12 +18,37 @@ import tkinter as tk
 from tkinter import messagebox, font as tkfont
 from urllib.request import urlretrieve
 import zipfile
-import json
+import json  # 【新增】用于保存/读取已播放历史
 
 try:
     import pygame
 except ImportError:
     pygame = None
+
+IS_WINDOWS = (os.name == "nt")
+
+def hidden_process_kwargs():
+    """返回可让子进程不弹出控制台黑框的 kwargs。
+
+    Windows: 使用 CREATE_NO_WINDOW + STARTUPINFO(wShowWindow=SW_HIDE)，
+    转换/播放时不会再跳出 ffmpeg/ffplay 的黑色运行框。
+    其他平台: 返回空字典，行为与原版本完全一致。
+    """
+    if not IS_WINDOWS:
+        return {}
+    kwargs = {}
+    try:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    except AttributeError:
+        pass
+    try:
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = startupinfo
+    except Exception:
+        pass
+    return kwargs
 
 #  FFmpeg自动安装器
 class FFmpegAutoInstaller:
@@ -61,7 +86,7 @@ class FFmpegAutoInstaller:
 
     def _cmd_exists(self, cmd):
         try:
-            result = subprocess.run([cmd, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+            result = subprocess.run([cmd, "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5, **hidden_process_kwargs())
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -151,7 +176,8 @@ class FFmpegAutoInstaller:
             try:
                 result = subprocess.run(
                     ["brew", "install", "ffmpeg"],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300,
+                    **hidden_process_kwargs()
                 )
                 if result.returncode == 0:
                     self._report("Homebrew安装完成", progress_callback)
@@ -261,7 +287,7 @@ class FFmpegAutoInstaller:
 
         try:
             self._report("正在调用系统安装器 (可能需要输入密码)...", progress_callback)
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300, **hidden_process_kwargs())
             if result.returncode == 0:
                 self._report("安装完成", progress_callback)
                 self._detect()
@@ -367,7 +393,10 @@ class MP4ToMP3Converter:
                 "-map", "a", mp3_path
             ]
             try:
-                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+                result = subprocess.run(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, timeout=300, **hidden_process_kwargs()
+                )
                 if result.returncode == 0:
                     converted.append(mp3_name)
                 else:
@@ -457,7 +486,8 @@ class AudioPlayer:
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=(sys.platform != "win32")
+                start_new_session=(sys.platform != "win32"),
+                **hidden_process_kwargs()
             )
         except FileNotFoundError:
             print(f"[AudioPlayer] 找不到播放器命令: {cmd[0]}")
@@ -524,7 +554,7 @@ class RandomPlayerApp:
 
     def __init__(self, root, auto_random=False):
         self.root = root
-        self.root.title("午休服务")
+        self.root.title("午休服务v1.1")
         self.root.geometry("600x480")
         self.root.configure(bg=self.BG_MAIN)
         self.root.minsize(480, 400)
@@ -552,11 +582,14 @@ class RandomPlayerApp:
         self.is_animating = False
         self.animation_after_id = None
         self.auto_play_after_conversion = False
+        # “未播放歌曲”列表视图状态：是否正在展示列表 + 展示前的界面快照
+        self.showing_unplayed = False
+        self._unplayed_backup = None
 
         self._build_ui()
         self.root.after(300, self._startup_flow)
 
-    # 【新增】加载已播放历史
+    # 加载已播放历史
     def _load_played_history(self):
         """从文件加载已播放历史，返回列表"""
         if not os.path.exists(self.history_file):
@@ -570,7 +603,7 @@ class RandomPlayerApp:
             print(f"[History] 加载历史记录失败: {e}")
         return []
 
-    # 【新增】保存已播放历史
+    # 保存已播放历史
     def _save_played_history(self):
         """将已播放列表保存到文件"""
         try:
@@ -581,7 +614,9 @@ class RandomPlayerApp:
 
     def _build_ui(self):
         title_font = tkfont.Font(family="Microsoft YaHei", size=18, weight="bold")
-        anim_font = tkfont.Font(family="Microsoft YaHei", size=16, weight="bold")
+        self.anim_font = tkfont.Font(family="Microsoft YaHei", size=16, weight="bold")
+        # 【新增】用于在歌曲名输出框中显示多行列表时使用的较小字体
+        self.anim_list_font = tkfont.Font(family="Microsoft YaHei", size=9)
         info_font = tkfont.Font(family="Microsoft YaHei", size=11)
         btn_font = tkfont.Font(family="Microsoft YaHei", size=12, weight="bold")
 
@@ -593,7 +628,7 @@ class RandomPlayerApp:
         self.root.config(menu=menubar)
 
         tk.Label(
-            self.root, text="午休服务", font=title_font,
+            self.root, text="午休服务v1.1", font=title_font,
             bg=self.BG_MAIN, fg=self.FG_TEXT
         ).pack(pady=(20, 8))
 
@@ -607,7 +642,7 @@ class RandomPlayerApp:
         self.anim_frame.pack(padx=40, pady=10, fill=tk.BOTH, expand=True)
 
         self.anim_label = tk.Label(
-            self.anim_frame, text="启动中，请稍候...", font=anim_font,
+            self.anim_frame, text="启动中，请稍候...", font=self.anim_font,
             bg=self.BG_FRAME, fg=self.FG_HIGHLIGHT, wraplength=480
         )
         self.anim_label.pack(expand=True, pady=30)
@@ -667,15 +702,137 @@ class RandomPlayerApp:
         )
         self.status_label.pack(pady=(4, 5))
 
+        # 【新增】底部操作行：未播放歌曲 / 手动转换
+        bottom_frame = tk.Frame(self.root, bg=self.BG_MAIN)
+        bottom_frame.pack(pady=5)
+
+        self.unplayed_btn = tk.Button(
+            bottom_frame, text="未播放歌曲", font=("Microsoft YaHei", 10),
+            bg=self.BTN_PRIMARY, fg=self.FG_TEXT, activebackground=self.BTN_HOVER,
+            width=10, cursor="hand2",
+            command=self._toggle_unplayed, relief="flat"
+        )
+        self.unplayed_btn.pack(side=tk.LEFT, padx=6)
+
         self.convert_btn = tk.Button(
-            self.root, text="手动转换/同步", font=("Microsoft YaHei", 10),
+            bottom_frame, text="手动转换/同步", font=("Microsoft YaHei", 10),
             bg=self.BTN_PRIMARY, fg=self.FG_TEXT, activebackground=self.BTN_HOVER,
             cursor="hand2", command=self._manual_conversion, relief="flat"
         )
-        self.convert_btn.pack(pady=5)
+        self.convert_btn.pack(side=tk.LEFT, padx=6)
 
     def _set_status(self, text):
         self.status_label.config(text=f"状态: {text}")
+
+    def _anim_wrap(self):
+        """按当前输出框宽度计算折行宽度，保证列表在任何窗口尺寸下都能完整显示。"""
+        try:
+            width = self.anim_frame.winfo_width()
+        except Exception:
+            width = 0
+        if width <= 1:
+            width = 480
+        return max(200, width - 24)
+
+    def _display_name(self, filename):
+        """【新增】用于界面显示的歌曲名：去掉 .mp3 等音频后缀。"""
+        return os.path.splitext(filename)[0]
+
+    def _set_anim_text(self, text, fg=None):
+        """在歌曲名输出框(anim_label)中显示一行文本，并恢复默认字号/对齐。"""
+        # 若当前正停留在“未播放歌曲”列表，任何新的显示内容都会覆盖它，同步退出该视图
+        if self.showing_unplayed:
+            self._exit_unplayed_view()
+        self.anim_label.pack_configure(pady=30)
+        self.anim_label.config(
+            text=text, font=self.anim_font, justify=tk.CENTER,
+            wraplength=self._anim_wrap()
+        )
+        if fg is not None:
+            self.anim_label.config(fg=fg)
+
+    def _toggle_unplayed(self):
+        """【新增】同一个按钮切换：显示未播放列表 / 返回原来的界面。"""
+        if self.showing_unplayed:
+            self._hide_unplayed()
+        else:
+            self._show_unplayed()
+
+    def _exit_unplayed_view(self):
+        """退出列表视图状态，但不恢复界面内容（内容由调用方决定）。"""
+        self.showing_unplayed = False
+        self._unplayed_backup = None
+        self.unplayed_btn.config(text="未播放歌曲")
+
+    def _hide_unplayed(self):
+        """【新增】从“未播放歌曲”列表返回，恢复点击前输出框与状态栏的内容。"""
+        backup = self._unplayed_backup or {}
+        self._exit_unplayed_view()
+
+        self.anim_label.pack_configure(pady=backup.get("pady", 30))
+        self.anim_label.config(
+            text=backup.get("text", "准备就绪"),
+            font=backup.get("font", self.anim_font),
+            fg=backup.get("fg", self.FG_HIGHLIGHT),
+            justify=backup.get("justify", tk.CENTER),
+            wraplength=self._anim_wrap()
+        )
+        if backup.get("status"):
+            self.status_label.config(text=backup["status"])
+
+    def _show_unplayed(self):
+        """【新增】遍历当前歌曲列表，在输出框中显示尚未播放过的歌曲名。
+
+        只读取内存中的 all_files / played 列表，不读写任何 json 文件。
+        """
+        if not self.all_files:
+            self._set_anim_text("没有可用的音频文件", fg=self.FG_WARN)
+            self._set_status("无可用音频")
+            return
+
+        if self.is_animating:
+            return
+
+        # 使用遍历的方式收集未播放歌曲（不依赖集合运算）
+        unplayed = []
+        for name in self.all_files:
+            if name not in self.played:
+                unplayed.append(name)
+
+        if not unplayed:
+            self._set_anim_text("全部歌曲均已播放", fg=self.FG_SUCCESS)
+            self._set_status("没有未播放歌曲")
+            return
+
+        # 记录点击前的界面快照，供同一个按钮“返回”时还原
+        try:
+            pady_now = self.anim_label.pack_info().get("pady", 30)
+        except Exception:
+            pady_now = 30
+        self._unplayed_backup = {
+            "text": self.anim_label.cget("text"),
+            "font": self.anim_label.cget("font"),
+            "fg": self.anim_label.cget("fg"),
+            "justify": self.anim_label.cget("justify"),
+            "pady": pady_now,
+            "status": self.status_label.cget("text"),
+        }
+        self.showing_unplayed = True
+        self.unplayed_btn.config(text="返回")
+
+        # 同样用遍历生成显示文本
+        items = []
+        for index, name in enumerate(unplayed, 1):
+            items.append(f"{index}. {os.path.splitext(name)[0]}")
+
+        header = f"未播放歌曲 ({len(unplayed)}/{len(self.all_files)}):"
+        text = header + "\n" + "   ".join(items)
+        self.anim_label.pack_configure(pady=6)
+        self.anim_label.config(
+            text=text, font=self.anim_list_font, fg=self.FG_TEXT,
+            justify=tk.LEFT, wraplength=self._anim_wrap()
+        )
+        self._set_status(f"未播放: {len(unplayed)} 首 / 共 {len(self.all_files)} 首")
 
     def _update_info(self):
         self.info_label.config(
@@ -689,7 +846,7 @@ class RandomPlayerApp:
             return
 
         self.ffmpeg_status.config(text="未检测到 FFmpeg", fg=self.FG_ERROR)
-        self.anim_label.config(text="未检测到 FFmpeg", fg=self.FG_ERROR)
+        self._set_anim_text("未检测到 FFmpeg", fg=self.FG_ERROR)
 
         platform_name = "Windows" if "win" in sys.platform else ("macOS" if "darwin" in sys.platform else "Linux")
         answer = messagebox.askyesno(
@@ -710,7 +867,7 @@ class RandomPlayerApp:
             return
 
         self._set_status("正在安装 FFmpeg...")
-        self.anim_label.config(text="正在安装 FFmpeg...\n请稍候", fg=self.FG_WARN)
+        self._set_anim_text("正在安装 FFmpeg...\n请稍候", fg=self.FG_WARN)
         self.convert_btn.config(state=tk.DISABLED)
         self.random_btn.config(state=tk.DISABLED)
 
@@ -741,7 +898,7 @@ class RandomPlayerApp:
                 "安装失败",
                 f"自动安装 FFmpeg 失败。\n\n{guide}\n\n安装完成后请重启本程序。"
             )
-            self.anim_label.config(text="安装失败\n请手动安装后重启", fg=self.FG_ERROR)
+            self._set_anim_text("安装失败\n请手动安装后重启", fg=self.FG_ERROR)
 
     def _init_app(self):
         self.converter = MP4ToMP3Converter(self.root_dir, self.ffmpeg_cmd)
@@ -749,7 +906,7 @@ class RandomPlayerApp:
 
         mp4_files = self.converter.get_mp4_files()
         if not mp4_files:
-            self.anim_label.config(text="未找到 MP4 文件\n请将视频放入程序同级目录", fg=self.FG_WARN)
+            self._set_anim_text("未找到 MP4 文件\n请将视频放入程序同级目录", fg=self.FG_WARN)
             self._set_status("等待 MP4 文件")
             return
 
@@ -761,7 +918,7 @@ class RandomPlayerApp:
                 detail.append(f"待转换: {len(missing)} 个")
             if orphan:
                 detail.append(f"待清理: {len(orphan)} 个")
-            self.anim_label.config(text=f"检测到文件变动\n{', '.join(detail)}", fg=self.FG_WARN)
+            self._set_anim_text(f"检测到文件变动\n{', '.join(detail)}", fg=self.FG_WARN)
             self._set_status("自动同步中...")
             self.auto_play_after_conversion = True
             self._do_conversion(auto_mode=True)
@@ -771,14 +928,14 @@ class RandomPlayerApp:
                 self._set_status("文件已同步，即将自动播放")
                 self.root.after(800, self._start_random)
             else:
-                self.anim_label.config(text="准备就绪", fg=self.FG_HIGHLIGHT)
+                self._set_anim_text("准备就绪", fg=self.FG_HIGHLIGHT)
                 self._set_status("文件已同步，等待操作")
 
     def _load_audio_list(self):
         audio_files = self.converter.get_audio_files()
         self.all_files = audio_files.copy()
         
-        # 【新增】加载历史记录并恢复播放状态
+        # 加载历史记录并恢复播放状态
         history = self._load_played_history()
         # 只保留当前仍然存在的文件（防止文件被删除后历史记录残留）
         self.played = [f for f in history if f in self.all_files]
@@ -839,10 +996,10 @@ class RandomPlayerApp:
                     self._set_status("转换完成，即将自动播放")
                     self.root.after(500, self._start_random)
                 else:
-                    self.anim_label.config(text="准备就绪", fg=self.FG_HIGHLIGHT)
+                    self._set_anim_text("准备就绪", fg=self.FG_HIGHLIGHT)
                     self._set_status("转换完成，等待操作")
             else:
-                self.anim_label.config(text="没有可用音频", fg=self.FG_ERROR)
+                self._set_anim_text("没有可用音频", fg=self.FG_ERROR)
                 self._set_status("无可用音频")
 
     def _start_random(self):
@@ -866,7 +1023,7 @@ class RandomPlayerApp:
         def animate(step=0):
             if step < steps:
                 name = random.choice(pool)
-                self.anim_label.config(text=name, fg=self.FG_TEXT)
+                self._set_anim_text(self._display_name(name), fg=self.FG_TEXT)
                 self.animation_after_id = self.root.after(interval, animate, step + 1)
             else:
                 self._finalize_selection()
@@ -883,12 +1040,12 @@ class RandomPlayerApp:
         self.remaining.remove(chosen)
         self.played.append(chosen)
         
-        # 【新增】每次播放后自动保存历史
+        # 每次播放后自动保存历史
         self._save_played_history()
 
-        self.anim_label.config(text=f"已选中: {chosen}", fg=self.FG_HIGHLIGHT)
+        self._set_anim_text(f"已选中: {self._display_name(chosen)}", fg=self.FG_HIGHLIGHT)
         self._update_info()
-        self._set_status(f"正在播放: {chosen}")
+        self._set_status(f"正在播放: {self._display_name(chosen)}")
 
         audio_path = os.path.join(self.converter.audio_dir, chosen)
         if os.path.exists(audio_path):
@@ -903,7 +1060,7 @@ class RandomPlayerApp:
         self.random_btn.config(state=tk.NORMAL)
 
     def _on_play_finish(self, name):
-        self._set_status(f"播放完成: {name}")
+        self._set_status(f"播放完成: {self._display_name(name)}")
 
     def _stop_playback(self):
         self.player.stop()
@@ -917,11 +1074,11 @@ class RandomPlayerApp:
         self.remaining = self.all_files.copy()
         self.played = []
         
-        # 【新增】重置时清空历史文件
+        # 重置时清空历史文件
         self._save_played_history()
         
         self._update_info()
-        self.anim_label.config(text="列表已重置", fg=self.FG_HIGHLIGHT)
+        self._set_anim_text("列表已重置", fg=self.FG_HIGHLIGHT)
         self._set_status("列表已重置")
 
     def _on_volume_change(self, value):
@@ -940,7 +1097,7 @@ class RandomPlayerApp:
         messagebox.showinfo("关于", about_text)
 
     def on_close(self):
-        # 【新增】关闭前保存已播放历史
+        # 关闭前保存已播放历史
         self._save_played_history()
         
         if self.player:
